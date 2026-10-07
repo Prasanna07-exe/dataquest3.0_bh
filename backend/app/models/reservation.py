@@ -33,6 +33,12 @@ class ResourceReservation(Base):
         nullable=False,
     )
 
+    warehouse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warehouses.id"),
+        nullable=True,
+        index=True,
+    )
+
     quantity: Mapped[int] = mapped_column(
         default=1,
         nullable=False,

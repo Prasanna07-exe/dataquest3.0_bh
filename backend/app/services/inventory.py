@@ -138,7 +138,10 @@ def consume_reserved_part(
         raise ValueError(
             "No active part reservation found for this service request."
         )
-
+    if reservation.warehouse_id != warehouse_id:
+        raise ValueError(
+            "Part usage warehouse does not match the reserved warehouse."
+        )
     if reservation.quantity < quantity:
         raise ValueError(
             f"Reserved quantity is insufficient. "

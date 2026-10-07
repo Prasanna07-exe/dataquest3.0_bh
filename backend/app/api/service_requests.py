@@ -252,10 +252,9 @@ def plan_service_request(
         )
 
     validate_transition(
-        service_request.state,
-        "PLANNING",
+        ServiceRequestState(service_request.state),
+        ServiceRequestState.PLANNING,
     )
-
     technicians = (
         db.query(Technician)
         .filter(Technician.is_active == True)

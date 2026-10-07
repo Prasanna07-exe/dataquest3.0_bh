@@ -85,6 +85,7 @@ def reserve_part_resource(
     assignment_id=None,
     resource_type="PART",
     resource_id=part_id,
+    warehouse_id=warehouse_id,
     quantity=quantity,
     start_at=start_at,
     end_at=end_at,
