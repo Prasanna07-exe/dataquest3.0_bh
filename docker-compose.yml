@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: dqbh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dqbh
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - dqbh_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dqbh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: dqbh-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - dqbh_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  dqbh_postgres_data:
+  dqbh_redis_data:
