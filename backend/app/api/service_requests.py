@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter,File, UploadFile
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+from fastapi.responses import FileResponse
+from fastapi import Depends, HTTPException
 from app.core.database import get_db
 from app.models.service_request import ServiceRequest, RequestAIAnalysis
 from app.schemas.service_request import ServiceRequestCreate
@@ -25,6 +27,8 @@ from app.schemas.checklist import ChecklistComplete
 from app.services.exception_engine import detect_technician_dropout
 from app.agents.request_classifier import classify_request
 from app.services.service_history import create_service_history
+from app.services.attachments import save_attachment
+from app.models.attachment import Attachment
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
@@ -1215,6 +1219,21 @@ def verify_service_request(
             },
         )
 
+    evidence_count = (
+        db.query(Attachment)
+        .filter(
+            Attachment.service_request_id == request.id,
+            Attachment.attachment_type == "EVIDENCE",
+        )
+        .count()
+    )
+
+    if evidence_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Completion verification requires at least one evidence attachment.",
+        )
+
     assignment = (
         db.query(Assignment)
         .filter(
@@ -1247,8 +1266,10 @@ def verify_service_request(
         "technician_id": assignment.technician_id,
         "checklist_total": len(checklist_rows),
         "mandatory_items": len(mandatory_items),
+        "evidence_count": evidence_count,
         "message": "Service verification passed.",
     }
+
 
 @router.post("/{request_id}/customer-approve")
 def customer_approve_service_request(
@@ -1432,3 +1453,112 @@ def simulate_technician_dropout(
         "exception_status": exception_event.status,
         "message": "Technician dropout detected successfully.",
     }
+
+@router.post("/{request_id}/attachments")
+def upload_service_request_attachment(
+    request_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if request is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service request not found.",
+        )
+
+    try:
+        attachment = save_attachment(
+            db=db,
+            service_request_id=request.id,
+            uploaded_by=1,
+            file=file,
+        )
+
+        db.commit()
+        db.refresh(attachment)
+
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+
+    return {
+        "attachment_id": attachment.id,
+        "request_id": attachment.service_request_id,
+        "file_name": attachment.file_name,
+        "content_type": attachment.content_type,
+        "file_size": attachment.file_size,
+        "attachment_type": attachment.attachment_type,
+        "message": "Attachment uploaded successfully.",
+    }
+
+@router.get("/{request_id}/attachments")
+def list_service_request_attachments(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if not request:
+        raise HTTPException(status_code=404, detail="Service request not found")
+
+    attachments = (
+        db.query(Attachment)
+        .filter(Attachment.service_request_id == request.id)
+        .order_by(Attachment.created_at.asc())
+        .all()
+    )
+
+    return [
+        {
+            "attachment_id": attachment.id,
+            "request_id": attachment.service_request_id,
+            "file_name": attachment.file_name,
+            "content_type": attachment.content_type,
+            "file_size": attachment.file_size,
+            "attachment_type": attachment.attachment_type,
+            "created_at": attachment.created_at,
+        }
+        for attachment in attachments
+    ]
+
+@router.get("/{request_id}/attachments/{attachment_id}")
+def download_service_request_attachment(
+    request_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+):
+    attachment = (
+        db.query(Attachment)
+        .filter(
+            Attachment.id == attachment_id,
+            Attachment.service_request_id == request_id,
+        )
+        .first()
+    )
+
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    file_path = Path(attachment.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+
+    return FileResponse(
+        path=file_path,
+        media_type=attachment.content_type,
+        filename=attachment.file_name,
+    )
