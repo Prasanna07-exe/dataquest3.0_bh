@@ -33,3 +33,8 @@ class ServiceRequestResponse(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: datetime
+
+class PartUsageCreate(BaseModel):
+    part_id: int
+    warehouse_id: int
+    quantity: int = Field(gt=0)

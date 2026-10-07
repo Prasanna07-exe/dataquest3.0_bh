@@ -29,7 +29,12 @@ from app.agents.request_classifier import classify_request
 from app.services.service_history import create_service_history
 from app.services.attachments import save_attachment
 from app.models.attachment import Attachment
-
+from app.schemas.service_request import PartUsageCreate
+from app.services.inventory import (
+    check_part_availability,
+    reserve_part,
+    consume_reserved_part,
+)
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
 
@@ -939,6 +944,84 @@ def create_work_log(
         "log_type": work_log.log_type,
         "description": work_log.description,
         "created_at": work_log.created_at,
+    }
+
+@router.post("/{request_id}/part-usage")
+def record_part_usage(
+    request_id: int,
+    payload: PartUsageCreate,
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if request is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service request not found.",
+        )
+
+    if request.state != ServiceRequestState.IN_PROGRESS.value:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Part usage requires IN_PROGRESS state. "
+                f"Current state: {request.state}"
+            ),
+        )
+
+    assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.service_request_id == request.id,
+            Assignment.status == "ACCEPTED",
+        )
+        .order_by(Assignment.id.desc())
+        .first()
+    )
+
+    if assignment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No accepted technician assignment found.",
+        )
+
+    try:
+        usage = consume_reserved_part(
+            db=db,
+            service_request_id=request.id,
+            assignment_id=assignment.id,
+            part_id=payload.part_id,
+            warehouse_id=payload.warehouse_id,
+            quantity=payload.quantity,
+            recorded_by=1,
+        )
+
+        db.commit()
+        db.refresh(usage)
+
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
+
+    return {
+        "request_id": request.id,
+        "request_code": request.request_code,
+        "assignment_id": assignment.id,
+        "part_usage_id": usage.id,
+        "part_id": usage.part_id,
+        "warehouse_id": usage.warehouse_id,
+        "quantity": usage.quantity,
+        "usage_type": usage.usage_type,
+        "recorded_by": usage.recorded_by,
+        "created_at": usage.created_at,
+        "message": "Part consumption recorded successfully.",
     }
 
 @router.get("/{request_id}/checklist")

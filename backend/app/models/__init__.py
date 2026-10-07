@@ -16,6 +16,7 @@ from app.models.checklist import ChecklistTemplate, ChecklistItem, WorkChecklist
 from app.models.exception_event import ExceptionEvent
 from app.models.service_history import ServiceHistory
 from app.models.attachment import Attachment
+from app.models.part_usage import PartUsage
 
 __all__ = [
     "Customer",
@@ -44,4 +45,5 @@ __all__ = [
     "WorkChecklist",
     "Attachment",
     "ServiceHistory",
+    "PartUsage",
 ]
