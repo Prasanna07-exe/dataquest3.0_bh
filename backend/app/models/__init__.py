@@ -14,6 +14,7 @@ from app.models.approval import Approval
 from app.models.work_log import WorkLog
 from app.models.checklist import ChecklistTemplate, ChecklistItem, WorkChecklist
 from app.models.exception_event import ExceptionEvent
+from app.models.service_history import ServiceHistory
 
 __all__ = [
     "Customer",
@@ -40,4 +41,5 @@ __all__ = [
     "ChecklistTemplate",
     "ChecklistItem",
     "WorkChecklist",
+    "ServiceHistory",
 ]

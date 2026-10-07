@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from app.core.database import get_db
-from app.models.service_request import ServiceRequest
+from app.models.service_request import ServiceRequest, RequestAIAnalysis
 from app.schemas.service_request import ServiceRequestCreate
 from app.rules.state_machine import validate_transition
 from app.services.request_validation import validate_service_request
@@ -23,6 +23,8 @@ from app.models.customer import Machine
 from app.models.checklist import ChecklistItem, WorkChecklist
 from app.schemas.checklist import ChecklistComplete
 from app.services.exception_engine import detect_technician_dropout
+from app.agents.request_classifier import classify_request
+from app.services.service_history import create_service_history
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
@@ -123,6 +125,78 @@ def validate_request(
         "request": service_request,
         "valid": result.valid,
         "issues": result.issues,
+    }
+
+@router.post("/{request_id}/classify")
+def classify_service_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if request is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service request not found.",
+        )
+
+    result = classify_request(
+        title=request.title,
+        description=request.description,
+        maintenance_mode=request.maintenance_mode,
+    )
+    existing_analysis = (
+        db.query(RequestAIAnalysis)
+        .filter(RequestAIAnalysis.request_id == request.id)
+        .order_by(RequestAIAnalysis.id.desc())
+        .first()
+    )
+    if existing_analysis:
+        analysis = existing_analysis
+        analysis.issue_type = result["issue_type"]
+        analysis.failure_mode = result["failure_mode"]
+        analysis.severity = result["severity"]
+        analysis.required_skills = result["required_skills"]
+        analysis.required_tools = result["required_tools"]
+        analysis.required_parts = result["required_parts"]
+        analysis.similar_failures = result["similar_failures"]
+        analysis.confidence = result["confidence"]
+        analysis.model_name = result["model_name"]
+        analysis.analysis_result = result["analysis_result"]
+    else:
+        analysis = RequestAIAnalysis(
+            request_id=request.id,
+            issue_type=result["issue_type"],
+            failure_mode=result["failure_mode"],
+            severity=result["severity"],
+            required_skills=result["required_skills"],
+            required_tools=result["required_tools"],
+            required_parts=result["required_parts"],
+            similar_failures=result["similar_failures"],
+            confidence=result["confidence"],
+            model_name=result["model_name"],
+            analysis_result=result["analysis_result"],
+        )
+        db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+
+    return {
+        "request_id": request.id,
+        "request_code": request.request_code,
+        "analysis_id": analysis.id,
+        "issue_type": analysis.issue_type,
+        "failure_mode": analysis.failure_mode,
+        "severity": analysis.severity,
+        "required_skills": analysis.required_skills,
+        "required_tools": analysis.required_tools,
+        "required_parts": analysis.required_parts,
+        "confidence": analysis.confidence,
+        "model_name": analysis.model_name,
     }
 
 @router.post("/{request_id}/sla")
@@ -1260,7 +1334,7 @@ def close_service_request(
     assignment.completed_at = datetime.now(timezone.utc)
 
     request.state = ServiceRequestState.CLOSED.value
-
+    history = create_service_history(db, request.id)
     db.commit()
     db.refresh(request)
     db.refresh(assignment)
