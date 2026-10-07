@@ -9,7 +9,7 @@ from app.schemas.service_request import ServiceRequestCreate
 from app.rules.state_machine import validate_transition
 from app.services.request_validation import validate_service_request
 from app.services.sla import calculate_sla
-from app.models.technician import Technician
+from app.models.technician import Technician, TechnicianAvailability
 from app.services.matching import MatchingFactors, rank_technicians
 from app.services.resource_check import check_resource_readiness
 from app.core.constants import ServiceRequestState
@@ -22,6 +22,7 @@ from app.services.checklist import create_work_checklist
 from app.models.customer import Machine
 from app.models.checklist import ChecklistItem, WorkChecklist
 from app.schemas.checklist import ChecklistComplete
+from app.services.exception_engine import detect_technician_dropout
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
@@ -518,6 +519,67 @@ def dispatch_service_request(
         "technician_id": assignment.technician_id,
         "assignment_status": assignment.status,
         "assigned_at": assignment.assigned_at,
+    }
+
+@router.post("/{request_id}/approve-reassignment")
+def approve_reassignment(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if request is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service request not found.",
+        )
+
+    assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.service_request_id == request.id,
+            Assignment.status == "PROPOSED",
+        )
+        .order_by(Assignment.id.desc())
+        .first()
+    )
+
+    if assignment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No proposed reassignment found.",
+        )
+
+    assignment.status = "ASSIGNED"
+    assignment.assigned_at = datetime.now(timezone.utc)
+
+    approval = Approval(
+        service_request_id=request.id,
+        approved_by=1,
+        status="APPROVED",
+        comments="Dynamic reassignment approved.",
+    )
+
+    db.add(approval)
+
+    db.commit()
+    db.refresh(assignment)
+    db.refresh(approval)
+
+    return {
+        "request_id": request.id,
+        "request_code": request.request_code,
+        "assignment_id": assignment.id,
+        "technician_id": assignment.technician_id,
+        "assignment_status": assignment.status,
+        "assigned_at": assignment.assigned_at,
+        "approval_id": approval.id,
+        "approval_status": approval.status,
+        "message": "Reassignment approved successfully.",
     }
 
 @router.post("/{request_id}/accept")
@@ -1212,4 +1274,87 @@ def close_service_request(
         "assignment_status": assignment.status,
         "completed_at": assignment.completed_at,
         "message": "Service request closed successfully.",
+    }
+
+@router.post("/{request_id}/simulate-technician-dropout")
+def simulate_technician_dropout(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    request = (
+        db.query(ServiceRequest)
+        .filter(ServiceRequest.id == request_id)
+        .first()
+    )
+
+    if not request:
+        raise HTTPException(
+            status_code=404,
+            detail="Service request not found",
+        )
+
+    assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.service_request_id == request_id,
+            Assignment.status.in_(["ASSIGNED", "ACCEPTED"]),
+        )
+        .order_by(Assignment.id.desc())
+        .first()
+    )
+
+    if not assignment:
+        raise HTTPException(
+            status_code=400,
+            detail="No active assignment found for this request",
+        )
+
+    technician = (
+        db.query(Technician)
+        .filter(Technician.id == assignment.technician_id)
+        .first()
+    )
+
+    if not technician:
+        raise HTTPException(
+            status_code=404,
+            detail="Assigned technician not found",
+        )
+
+    technician_availability = (
+        db.query(TechnicianAvailability)
+        .filter(
+            TechnicianAvailability.technician_id == technician.id
+        )
+        .order_by(TechnicianAvailability.id.desc())
+        .first()
+    )
+
+    if technician_availability:
+        technician_availability.status = "UNAVAILABLE"
+
+    exception_event = detect_technician_dropout(
+        db=db,
+        service_request_id=request.id,
+        technician_id=technician.id,
+    )
+
+    assignment.status = "DROPPED"
+
+    db.commit()
+    db.refresh(exception_event)
+
+    return {
+        "request_id": request.id,
+        "request_code": request.request_code,
+        "assignment_id": assignment.id,
+        "technician_id": technician.id,
+        "technician_code": technician.technician_code,
+        "technician_status": "UNAVAILABLE",
+        "assignment_status": assignment.status,
+        "exception_id": exception_event.id,
+        "exception_type": exception_event.exception_type,
+        "severity": exception_event.severity,
+        "exception_status": exception_event.status,
+        "message": "Technician dropout detected successfully.",
     }

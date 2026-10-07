@@ -13,6 +13,8 @@ from app.models.reservation import ResourceReservation
 from app.models.approval import Approval
 from app.models.work_log import WorkLog
 from app.models.checklist import ChecklistTemplate, ChecklistItem, WorkChecklist
+from app.models.exception_event import ExceptionEvent
+
 __all__ = [
     "Customer",
     "Machine",
