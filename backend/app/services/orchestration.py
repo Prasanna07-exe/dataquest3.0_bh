@@ -67,6 +67,8 @@ def reserve_part_resource(
     part_id: int,
     warehouse_id: int,
     quantity: int,
+    start_at: datetime,
+    end_at: datetime,
 ) -> ResourceReservation:
     if quantity <= 0:
         raise ValueError("Part quantity must be greater than zero.")
@@ -79,13 +81,15 @@ def reserve_part_resource(
     )
 
     reservation = ResourceReservation(
-        service_request_id=service_request_id,
-        assignment_id=None,
-        resource_type="PART",
-        resource_id=part_id,
-        quantity=quantity,
-        status="RESERVED",
-        created_at=datetime.now(timezone.utc),
+    service_request_id=service_request_id,
+    assignment_id=None,
+    resource_type="PART",
+    resource_id=part_id,
+    quantity=quantity,
+    start_at=start_at,
+    end_at=end_at,
+    status="RESERVED",
+    created_at=datetime.now(timezone.utc),
     )
 
     db.add(reservation)
@@ -129,6 +133,8 @@ def plan_resources(
             part_id=part["part_id"],
             warehouse_id=part["warehouse_id"],
             quantity=part["quantity"],
+            start_at=technician_start_at,
+            end_at=technician_end_at,
         )
         part_reservations.append(reservation)
 

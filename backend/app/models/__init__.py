@@ -10,7 +10,9 @@ from app.models.inventory import (
 )
 from app.models.assignment import Assignment
 from app.models.reservation import ResourceReservation
-
+from app.models.approval import Approval
+from app.models.work_log import WorkLog
+from app.models.checklist import ChecklistTemplate, ChecklistItem, WorkChecklist
 __all__ = [
     "Customer",
     "Machine",
@@ -32,4 +34,8 @@ __all__ = [
     "Warehouse",
     "Assignment",
     "ResourceReservation",
+    "Approval",
+    "ChecklistTemplate",
+    "ChecklistItem",
+    "WorkChecklist",
 ]

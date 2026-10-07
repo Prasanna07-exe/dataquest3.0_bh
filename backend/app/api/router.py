@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 from app.core.database import engine
 from app.core.redis import redis_client
-
+from app.api.service_requests import router as service_request_router
 
 router = APIRouter(prefix="/api/v1")
 
@@ -36,3 +36,5 @@ def redis_health():
         "redis": "connected",
         "ping": result,
     }
+
+router.include_router(service_request_router)
