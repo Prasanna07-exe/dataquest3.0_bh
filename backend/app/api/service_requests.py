@@ -35,6 +35,8 @@ from app.services.inventory import (
     reserve_part,
     consume_reserved_part,
 )
+from app.services.state_transition import transition_service_request
+from app.rules.state_machine import ServiceRequestState
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
 
@@ -82,7 +84,13 @@ def submit_service_request(
         "SUBMITTED",
     )
 
-    service_request.state = "SUBMITTED"
+    transition_service_request(
+        db=db,
+        service_request=service_request,
+        new_state=ServiceRequestState.SUBMITTED,
+        action="SERVICE_REQUEST_SUBMITTED",
+        actor_user_id=1,
+    )
     db.commit()
     db.refresh(service_request)
 
@@ -106,7 +114,13 @@ def validate_request(
         "VALIDATING",
     )
 
-    service_request.state = "VALIDATING"
+    transition_service_request(
+        db=db,
+        service_request=service_request,
+        new_state=ServiceRequestState.VALIDATING,
+        action="SERVICE_REQUEST_VALIDATING",
+        actor_user_id=1,
+    )
     db.flush()
 
     result = validate_service_request(
@@ -119,7 +133,13 @@ def validate_request(
             service_request.state,
             "VALIDATED",
         )
-        service_request.state = "VALIDATED"
+        transition_service_request(
+            db=db,
+            service_request=service_request,
+            new_state=ServiceRequestState.VALIDATED,
+            action="SERVICE_REQUEST_VALIDATED",
+            actor_user_id=1,
+        )
     else:
         validate_transition(
             service_request.state,
@@ -295,7 +315,13 @@ def plan_service_request(
 
     ranked = rank_technicians(db, candidates)
 
-    service_request.state = "PLANNING"
+    transition_service_request(
+        db=db,
+        service_request=service_request,
+        new_state=ServiceRequestState.PLANNING,
+        action="SERVICE_REQUEST_PLANNING",
+        actor_user_id=1,
+    )
     db.commit()
     db.refresh(service_request)
 
@@ -377,9 +403,23 @@ def resource_check_service_request(
     )
 
     if result["ready"]:
-        request.state = ServiceRequestState.RESOURCES_READY.value
+        transition_service_request(
+            db=db,
+            service_request=request,
+            new_state=ServiceRequestState.RESOURCES_READY,
+            action="RESOURCES_READY",
+            actor_user_id=1,
+            details="Required technician and parts are available.",
+        )
     else:
-        request.state = ServiceRequestState.BLOCKED_BY_RESOURCE.value
+        transition_service_request(
+            db=db,
+            service_request=request,
+            new_state=ServiceRequestState.BLOCKED_BY_RESOURCE,
+            action="RESOURCES_BLOCKED",
+            actor_user_id=1,
+            details="One or more required resources are unavailable.",
+        )
 
     db.commit()
     db.refresh(request)
@@ -466,7 +506,14 @@ def reserve_service_request_resources(
             ],
         )
 
-        request.state = ServiceRequestState.PENDING_APPROVAL.value
+        transition_service_request(
+            db=db,
+            service_request=request,
+            new_state=ServiceRequestState.PENDING_APPROVAL,
+            action="RESOURCES_PENDING_APPROVAL",
+            actor_user_id=1,
+            details="Resources reserved and request is awaiting manager approval.",
+        )
 
         db.commit()
 
@@ -527,7 +574,14 @@ def approve_service_request(
 
     db.add(approval)
 
-    request.state = ServiceRequestState.APPROVED.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.APPROVED,
+        action="SERVICE_REQUEST_APPROVED",
+        actor_user_id=1,
+        details="Manager approval recorded.",
+    )
 
     db.commit()
     db.refresh(approval)
@@ -587,7 +641,14 @@ def dispatch_service_request(
     assignment.status = "ASSIGNED"
     assignment.assigned_at = datetime.now(timezone.utc)
 
-    request.state = ServiceRequestState.DISPATCHED.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.DISPATCHED,
+        action="SERVICE_REQUEST_DISPATCHED",
+        actor_user_id=1,
+        details="Technician dispatch initiated.",
+    )
 
     db.commit()
     db.refresh(assignment)
@@ -711,7 +772,14 @@ def accept_service_request(
     assignment.status = "ACCEPTED"
     assignment.accepted_at = now
 
-    request.state = ServiceRequestState.ACCEPTED_BY_TECH.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.ACCEPTED_BY_TECH,
+        action="TECHNICIAN_ACCEPTED",
+        actor_user_id=1,
+        details="Technician accepted the dispatched service request.",
+    )
 
     db.commit()
     db.refresh(assignment)
@@ -861,7 +929,14 @@ def start_service_request_work(
         machine_type="DM-X100",
     )
 
-    request.state = ServiceRequestState.IN_PROGRESS.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.IN_PROGRESS,
+        action="WORK_STARTED",
+        actor_user_id=1,
+        details="Technician started work on the service request.",
+    )
 
     db.commit()
 
@@ -1226,8 +1301,13 @@ def complete_service_request(
             },
         )
 
-    request.state = (
-        ServiceRequestState.COMPLETED_PENDING_VERIFICATION.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.COMPLETED_PENDING_VERIFICATION,
+        action="WORK_COMPLETED",
+        actor_user_id=1,
+        details="Technician completed required work and checklist.",
     )
 
     db.commit()
@@ -1335,7 +1415,14 @@ def verify_service_request(
     request.state = ServiceRequestState.VERIFICATION.value
     db.commit()
 
-    request.state = ServiceRequestState.PASSED.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.PASSED,
+        action="VERIFICATION_PASSED",
+        actor_user_id=1,
+        details="Completion verification passed.",
+    )
     db.commit()
 
     db.refresh(request)
@@ -1379,7 +1466,14 @@ def customer_approve_service_request(
             ),
         )
 
-    request.state = ServiceRequestState.CUSTOMER_APPROVAL.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.CUSTOMER_APPROVAL,
+        action="CUSTOMER_APPROVAL_RECORDED",
+        actor_user_id=1,
+        details="Customer approval recorded for completed service.",
+    )
 
     db.commit()
     db.refresh(request)
@@ -1436,7 +1530,14 @@ def close_service_request(
     assignment.status = "COMPLETED"
     assignment.completed_at = datetime.now(timezone.utc)
 
-    request.state = ServiceRequestState.CLOSED.value
+    transition_service_request(
+        db=db,
+        service_request=request,
+        new_state=ServiceRequestState.CLOSED,
+        action="SERVICE_REQUEST_CLOSED",
+        actor_user_id=1,
+        details="Service request closed and service history recorded.",
+    )
     history = create_service_history(db, request.id)
     db.commit()
     db.refresh(request)

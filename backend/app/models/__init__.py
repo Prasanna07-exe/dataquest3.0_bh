@@ -17,6 +17,7 @@ from app.models.exception_event import ExceptionEvent
 from app.models.service_history import ServiceHistory
 from app.models.attachment import Attachment
 from app.models.part_usage import PartUsage
+from app.models.audit import AuditLog
 
 __all__ = [
     "Customer",
@@ -46,4 +47,5 @@ __all__ = [
     "Attachment",
     "ServiceHistory",
     "PartUsage",
+    "AuditLog",
 ]
